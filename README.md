@@ -2,11 +2,9 @@
   <img src="assets/rag-vector-security-lab.png" alt="RAG Vector Security Lab" width="100%">
 </p>
 
- 🛡️ RAG Vector Security Lab
 
-Laboratório prático de **RAG (Retrieval-Augmented Generation) aplicado à Cibersegurança**, utilizando **Python, PostgreSQL, pgvector, embeddings semânticos e Ollama**.
 
-O projeto demonstra a construção de um pipeline RAG local capaz de recuperar informações de segurança por similaridade vetorial, aplicar um threshold de confiança e fornecer ao modelo de linguagem somente contextos considerados relevantes.
+
 
 ---
 

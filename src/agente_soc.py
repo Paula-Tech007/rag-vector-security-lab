@@ -1,7 +1,40 @@
 """Agente SOC inicial para demonstrar decisao e uso de ferramentas."""
 
+import json
+import urllib.request
+
 from rag import executar_rag
 
+
+OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
+OLLAMA_MODEL = "qwen3:4b-instruct"
+
+
+FERRAMENTAS_OLLAMA = [
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_rag",
+            "description": (
+                "Consulta a base vetorial de conhecimento de "
+                "seguranca cibernetica quando for necessario "
+                "contexto tecnico."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pergunta": {
+                        "type": "string",
+                        "description": (
+                            "Pergunta de seguranca a consultar no RAG."
+                        ),
+                    }
+                },
+                "required": ["pergunta"],
+            },
+        },
+    }
+]
 
 PALAVRAS_RAG = {
     "phishing",
@@ -68,6 +101,137 @@ Entrada:
         pass
 
     return decidir_ferramenta(entrada)
+
+def consultar_agente_ollama(entrada: str) -> dict:
+    """Envia a entrada ao Ollama com as ferramentas disponiveis."""
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Voce e um agente SOC. "
+                    "Use consultar_rag quando precisar consultar "
+                    "a base de conhecimento de seguranca cibernetica. "
+                    "Caso contrario, responda sem usar ferramenta."
+                ),
+            },
+            {
+                "role": "user",
+                "content": entrada,
+            },
+        ],
+        "tools": FERRAMENTAS_OLLAMA,
+        "stream": False,
+    }
+
+    dados = json.dumps(payload).encode("utf-8")
+
+    requisicao = urllib.request.Request(
+        OLLAMA_CHAT_URL,
+        data=dados,
+        headers={
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    with urllib.request.urlopen(
+        requisicao,
+        timeout=120,
+    ) as resposta_http:
+        resposta_json = json.loads(
+            resposta_http.read().decode("utf-8")
+        )
+
+    return resposta_json.get("message", {})
+
+def extrair_tool_call(mensagem: dict):
+    """Extrai a primeira chamada de ferramenta solicitada pelo modelo."""
+    tool_calls = mensagem.get("tool_calls") or []
+
+    if not tool_calls:
+        return None
+
+    chamada = tool_calls[0]
+    funcao = chamada.get("function") or {}
+
+    nome = funcao.get("name")
+    argumentos = funcao.get("arguments") or {}
+
+    if not nome:
+        return None
+
+    if isinstance(argumentos, str):
+        try:
+            import json
+            argumentos = json.loads(argumentos)
+        except json.JSONDecodeError:
+            argumentos = {}
+
+    if not isinstance(argumentos, dict):
+        argumentos = {}
+
+    return nome, argumentos
+
+
+def executar_tool(nome: str, argumentos: dict) -> dict:
+    """Executa somente ferramentas explicitamente permitidas pelo agente."""
+    if nome != "consultar_rag":
+        return {
+            "status": "erro",
+            "ferramenta": "nao_permitida",
+            "resposta": f"Ferramenta nao permitida: {nome}",
+        }
+
+    pergunta = argumentos.get("pergunta", "")
+
+    if not isinstance(pergunta, str) or not pergunta.strip():
+        return {
+            "status": "erro",
+            "ferramenta": "consultar_rag",
+            "resposta": "Pergunta invalida para consultar_rag.",
+        }
+
+    return executar_rag(pergunta.strip())
+
+def executar_agente_nativo(entrada: str) -> dict:
+    """Executa o agente usando Tool Calling nativo do Ollama."""
+    entrada = entrada.strip()
+
+    if not entrada:
+        return {
+            "status": "erro",
+            "ferramenta": "nenhuma",
+            "resposta": "Entrada vazia.",
+        }
+
+    mensagem = consultar_agente_ollama(entrada)
+    chamada = extrair_tool_call(mensagem)
+
+    if chamada is None:
+        return {
+            "status": "sem_acao",
+            "ferramenta": "nenhuma",
+            "resposta": (
+                mensagem.get("content", "").strip()
+                or "Nenhuma ferramenta foi necessaria."
+            ),
+        }
+
+    nome, argumentos = chamada
+
+    resultado = executar_tool(
+        nome,
+        argumentos,
+    )
+
+    return {
+        "status": resultado["status"],
+        "ferramenta": nome,
+        "resposta": resultado["resposta"],
+        "contextos": resultado.get("contextos", []),
+    }
 
 def executar_agente(entrada: str) -> dict:
     """Executa uma decisao simples de agente e chama a ferramenta adequada."""

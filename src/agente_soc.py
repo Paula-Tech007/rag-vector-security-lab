@@ -102,25 +102,37 @@ Entrada:
 
     return decidir_ferramenta(entrada)
 
-def consultar_agente_ollama(entrada: str) -> dict:
-    """Envia a entrada ao Ollama com as ferramentas disponiveis."""
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Voce e um agente SOC. "
-                    "Use consultar_rag quando precisar consultar "
-                    "a base de conhecimento de seguranca cibernetica. "
-                    "Caso contrario, responda sem usar ferramenta."
-                ),
-            },
+def consultar_agente_ollama(entrada) -> dict:
+    """Envia entrada ou historico de mensagens ao Ollama."""
+    mensagem_sistema = {
+        "role": "system",
+        "content": (
+            "Voce e um agente SOC. "
+            "Use consultar_rag quando precisar consultar "
+            "a base de conhecimento de seguranca cibernetica. "
+            "Caso receba o resultado de uma ferramenta, use esse "
+            "resultado para produzir a resposta final. "
+            "Nao invente informacoes que nao estejam no resultado."
+        ),
+    }
+
+    if isinstance(entrada, list):
+        messages = [
+            mensagem_sistema,
+            *entrada,
+        ]
+    else:
+        messages = [
+            mensagem_sistema,
             {
                 "role": "user",
                 "content": entrada,
             },
-        ],
+        ]
+
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": messages,
         "tools": FERRAMENTAS_OLLAMA,
         "stream": False,
     }
@@ -194,6 +206,95 @@ def executar_tool(nome: str, argumentos: dict) -> dict:
         }
 
     return executar_rag(pergunta.strip())
+
+def executar_agent_loop(entrada: str) -> dict:
+    """Executa um ciclo controlado: decisao, tool, observacao e resposta."""
+    entrada = entrada.strip()
+
+    if not entrada:
+        return {
+            "status": "erro",
+            "ferramenta": "nenhuma",
+            "resposta": "Entrada vazia.",
+        }
+
+    primeira_mensagem = consultar_agente_ollama(entrada)
+    chamada = extrair_tool_call(primeira_mensagem)
+
+    if chamada is None:
+        return {
+            "status": "sem_acao",
+            "ferramenta": "nenhuma",
+            "resposta": (
+                primeira_mensagem.get("content", "").strip()
+                or "Nenhuma ferramenta foi necessaria."
+            ),
+        }
+
+    nome, argumentos = chamada
+
+    resultado_tool = executar_tool(
+        nome,
+        argumentos,
+    )
+
+    observacao = {
+        "status": resultado_tool.get("status"),
+        "resposta": resultado_tool.get("resposta"),
+        "contextos": resultado_tool.get("contextos", []),
+    }
+
+    historico = [
+        {
+            "role": "user",
+            "content": entrada,
+        },
+        primeira_mensagem,
+        {
+            "role": "tool",
+            "content": json.dumps(
+                observacao,
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+    mensagem_final = consultar_agente_ollama(
+        historico
+    )
+
+    segunda_chamada = extrair_tool_call(
+        mensagem_final
+    )
+
+    if segunda_chamada is not None:
+        return {
+            "status": "limite",
+            "ferramenta": nome,
+            "resposta": (
+                "Limite de chamadas de ferramenta atingido."
+            ),
+            "contextos": resultado_tool.get(
+                "contextos",
+                [],
+            ),
+        }
+
+    return {
+        "status": resultado_tool.get(
+            "status",
+            "ok",
+        ),
+        "ferramenta": nome,
+        "resposta": (
+            mensagem_final.get("content", "").strip()
+            or resultado_tool.get("resposta", "")
+        ),
+        "contextos": resultado_tool.get(
+            "contextos",
+            [],
+        ),
+    }
 
 def executar_agente_nativo(entrada: str) -> dict:
     """Executa o agente usando Tool Calling nativo do Ollama."""

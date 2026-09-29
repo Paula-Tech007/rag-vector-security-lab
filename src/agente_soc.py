@@ -207,6 +207,118 @@ def executar_tool(nome: str, argumentos: dict) -> dict:
 
     return executar_rag(pergunta.strip())
 
+MAX_REACT_STEPS = 3
+
+
+def executar_react(
+    entrada: str,
+    max_steps: int = MAX_REACT_STEPS,
+) -> dict:
+    """Executa ciclo ReAct controlado com trace operacional."""
+    entrada = entrada.strip()
+
+    if not entrada:
+        return {
+            "status": "erro",
+            "resposta": "Entrada vazia.",
+            "trace": [],
+        }
+
+    if max_steps < 1:
+        return {
+            "status": "erro",
+            "resposta": "max_steps deve ser maior que zero.",
+            "trace": [],
+        }
+
+    historico = [
+        {
+            "role": "user",
+            "content": entrada,
+        }
+    ]
+
+    trace = []
+
+    for passo in range(1, max_steps + 1):
+        mensagem = consultar_agente_ollama(
+            historico
+        )
+
+        chamada = extrair_tool_call(
+            mensagem
+        )
+
+        if chamada is None:
+            resposta = (
+                mensagem.get("content", "").strip()
+                or "Nenhuma ferramenta foi necessaria."
+            )
+
+            return {
+                "status": (
+                    "sem_acao"
+                    if not trace
+                    else "ok"
+                ),
+                "resposta": resposta,
+                "trace": trace,
+            }
+
+        nome, argumentos = chamada
+
+        resultado_tool = executar_tool(
+            nome,
+            argumentos,
+        )
+
+        trace.append(
+            {
+                "passo": passo,
+                "ferramenta": nome,
+                "argumentos": argumentos,
+                "status": resultado_tool.get(
+                    "status",
+                    "desconhecido",
+                ),
+            }
+        )
+
+        observacao = {
+            "status": resultado_tool.get(
+                "status",
+            ),
+            "resposta": resultado_tool.get(
+                "resposta",
+            ),
+            "contextos": resultado_tool.get(
+                "contextos",
+                [],
+            ),
+        }
+
+        historico.append(
+            mensagem
+        )
+
+        historico.append(
+            {
+                "role": "tool",
+                "content": json.dumps(
+                    observacao,
+                    ensure_ascii=False,
+                ),
+            }
+        )
+
+    return {
+        "status": "limite",
+        "resposta": (
+            "Limite de passos ReAct atingido."
+        ),
+        "trace": trace,
+    }
+
 def executar_agent_loop(entrada: str) -> dict:
     """Executa um ciclo controlado: decisao, tool, observacao e resposta."""
     entrada = entrada.strip()

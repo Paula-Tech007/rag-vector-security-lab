@@ -2,67 +2,125 @@
   <img src="assets/rag-vector-security-lab.png" alt="RAG Vector Security Lab" width="100%">
 </p>
 
+# RAG Vector Security Lab
 
-## 🎯 Objetivo
+Laboratório prático de **RAG e Agentic RAG aplicado à Segurança Cibernética**, utilizando PostgreSQL, pgvector, embeddings semânticos, Ollama e agentes de IA com Tool Calling e ReAct.
 
-Construir uma arquitetura RAG voltada para cenários de Segurança Cibernética, combinando:
-
-- armazenamento vetorial;
-- embeddings semânticos;
-- busca por similaridade;
-- filtragem por threshold;
-- recuperação de contexto;
-- geração de respostas com LLM local;
-- fallback seguro quando não existe contexto confiável;
-- proteção de credenciais por variáveis de ambiente;
-- testes automatizados.
+O projeto começou como um pipeline RAG seguro e está evoluindo progressivamente para uma arquitetura de **Agente SOC com IA**, mantendo controle de contexto, guardrails, rastreabilidade e testes automatizados.
 
 ---
 
-## 🧠 Arquitetura
+## 🎯 Objetivo
+
+Construir e evoluir uma arquitetura de IA aplicada a cenários de Segurança Cibernética capaz de:
+
+- armazenar conhecimento em banco vetorial;
+- gerar embeddings semânticos;
+- realizar busca por similaridade;
+- aplicar threshold de confiança;
+- recuperar somente contexto relevante;
+- utilizar LLM local com Ollama;
+- evitar respostas baseadas em contexto não confiável;
+- permitir que um agente escolha quando utilizar ferramentas;
+- executar ferramentas através de Native Tool Calling;
+- trabalhar com ciclos controlados de Agent Loop e ReAct;
+- registrar trace operacional das ações;
+- limitar execuções autônomas por guardrails;
+- proteger credenciais com variáveis de ambiente;
+- validar comportamento através de testes automatizados.
+
+---
+
+## 🧠 Evolução da arquitetura
 
 ```text
-Pergunta do usuário
-        │
-        ▼
-┌───────────────────────┐
-│ Geração do Embedding  │
-│ Sentence Transformers │
-└───────────┬───────────┘
-            │
-            ▼
-┌───────────────────────┐
-│ PostgreSQL + pgvector │
-│ Busca Vetorial        │
-└───────────┬───────────┘
-            │
-            ▼
-┌───────────────────────┐
-│ Threshold >= 0.60     │
-└───────────┬───────────┘
-            │
-       ┌────┴────┐
-       │         │
-       ▼         ▼
-   APROVADO   DESCARTADO
-       │         │
-       ▼         ▼
-   Contexto    Sem contexto
-   confiável   confiável
-       │         │
-       ▼         ▼
-    Ollama    Resposta segura
-       │
-       ▼
-Resposta baseada
-no contexto
+RAG
+ │
+ ▼
+Agent Routing
+ │
+ ▼
+LLM-based Routing
+ │
+ ▼
+Native Tool Calling
+ │
+ ▼
+Agent Loop
+ │
+ ▼
+ReAct
+ │
+ ▼
+Memory
+ │
+ ▼
+SOC Agent
+ │
+ ▼
+MCP / Multi-Agent
+```
+
+As etapas até **ReAct** já foram implementadas.
+
+As etapas seguintes fazem parte do roadmap do laboratório.
+
+---
+
+## 🏗️ Arquitetura atual
+
+```text
+                    ┌──────────────────────┐
+                    │   Entrada do usuário │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │   Agente SOC / Qwen  │
+                    └──────────┬───────────┘
+                               │
+                     decisão de ferramenta
+                               │
+                 ┌─────────────┴─────────────┐
+                 │                           │
+                 ▼                           ▼
+        responder diretamente       consultar_rag
+                                             │
+                                             ▼
+                                      gerar embedding
+                                             │
+                                             ▼
+                                   PostgreSQL + pgvector
+                                             │
+                                             ▼
+                                      busca semântica
+                                             │
+                                             ▼
+                                   threshold de confiança
+                                             │
+                                  ┌──────────┴──────────┐
+                                  │                     │
+                                  ▼                     ▼
+                           contexto confiável     contexto insuficiente
+                                  │                     │
+                                  ▼                     ▼
+                             observação           fallback seguro
+                                  │
+                                  ▼
+                           volta ao agente
+                                  │
+                                  ▼
+                          próxima decisão
+                                  │
+                                  ▼
+                           resposta final
 ```
 
 ---
 
-## 🔄 Pipeline RAG
+## 🔎 Pipeline RAG
 
-Quando existe contexto confiável:
+O RAG continua sendo uma ferramenta central da arquitetura.
 
 ```text
 Pergunta
@@ -75,79 +133,237 @@ Busca por similaridade
    ↓
 Threshold
    ↓
-Contexto confiável
-   ↓
-Prompt aumentado
-   ↓
-Ollama
-   ↓
-Resposta
+Contexto confiável?
+   ├── SIM → Ollama → Resposta baseada no contexto
+   └── NÃO → Resposta segura
 ```
 
-Quando nenhum documento ultrapassa o threshold:
+Quando nenhum documento atinge o threshold mínimo, o pipeline retorna:
+
+```text
+Nao ha informacao suficiente no contexto.
+```
+
+Nesse cenário, o RAG não envia contexto inadequado ao LLM.
+
+---
+
+## 🤖 Agentic RAG
+
+Além do pipeline RAG tradicional, o laboratório possui uma camada de agente responsável por decidir quando utilizar ferramentas.
+
+Isso muda o fluxo de:
+
+```text
+Pergunta → RAG → Resposta
+```
+
+para:
 
 ```text
 Pergunta
    ↓
-Embedding
+Agente
    ↓
-PostgreSQL + pgvector
-   ↓
-Threshold
-   ↓
-Sem contexto confiável
-   ↓
-"Nao ha informacao suficiente no contexto."
+Decisão
+   ├── responder diretamente
+   └── utilizar ferramenta
+              ↓
+             RAG
+              ↓
+          observação
+              ↓
+            Agente
+              ↓
+        resposta final
 ```
 
-Nesse cenário, o pipeline termina sem chamar o Ollama.
+O RAG não é substituído pelo agente.
+
+Ele passa a funcionar como uma **ferramenta especializada de recuperação de conhecimento**.
 
 ---
 
-## 🛠️ Tecnologias
+## 🧭 Agent Routing
 
-| Tecnologia | Utilização |
-|---|---|
-| Python | Pipeline RAG e processamento |
-| PostgreSQL | Persistência dos documentos |
-| pgvector | Armazenamento e busca vetorial |
-| Sentence Transformers | Geração de embeddings |
-| Ollama | Execução local do modelo de linguagem |
-| Docker | Infraestrutura PostgreSQL + pgvector |
-| Pytest | Testes automatizados |
-| Git / GitHub | Versionamento |
+A primeira evolução agentic implementada foi o roteamento de ferramentas.
 
----
-
-## 📂 Estrutura do projeto
+O agente consegue distinguir situações em que deve:
 
 ```text
-rag-vector-security-lab/
-│
-├── src/
-│   ├── busca_pgvector.py
-│   ├── busca_semantica.py
-│   ├── config.py
-│   ├── ingestao_pgvector.py
-│   ├── primeiro_embedding.py
-│   └── rag.py
-│
-├── tests/
-│   └── test_threshold.py
-│
-├── .env.example
-├── .gitignore
-├── docker-compose.yml
-└── README.md
+consultar_rag
 ```
+
+ou:
+
+```text
+nenhuma ferramenta
+```
+
+O laboratório possui tanto roteamento determinístico quanto roteamento baseado em LLM para fins de aprendizado e comparação arquitetural.
 
 ---
 
-## 🔎 Busca vetorial
+## 🧠 LLM-based Tool Routing
 
-As perguntas são transformadas em embeddings e comparadas aos vetores armazenados no PostgreSQL utilizando o **pgvector**.
+O projeto evoluiu o roteamento para permitir que o modelo determine quando uma ferramenta é necessária.
 
-Exemplo validado no laboratório:
+Essa etapa introduziu a separação entre:
+
+```text
+entrada
+   ↓
+modelo
+   ↓
+decisão de ferramenta
+   ↓
+execução
+```
+
+Essa implementação foi mantida como parte da evolução didática do laboratório.
+
+---
+
+## 🛠️ Native Tool Calling
+
+O agente utiliza o endpoint de chat do Ollama com definição estruturada de ferramentas.
+
+Ferramenta atualmente disponível:
+
+```text
+consultar_rag
+```
+
+O modelo pode solicitar nativamente sua execução através de `tool_calls`.
+
+Fluxo:
+
+```text
+Usuário
+   ↓
+Ollama / Qwen
+   ↓
+tool_call
+   ↓
+consultar_rag
+   ↓
+resultado
+```
+
+Somente ferramentas explicitamente permitidas podem ser executadas.
+
+---
+
+## 🔄 Agent Loop
+
+O Agent Loop permite devolver o resultado da ferramenta ao modelo.
+
+```text
+Pergunta
+   ↓
+Agente
+   ↓
+Tool Call
+   ↓
+RAG
+   ↓
+Observação
+   ↓
+Agente
+   ↓
+Resposta final
+```
+
+Essa etapa permite que o modelo utilize o resultado real da ferramenta antes de produzir sua resposta.
+
+---
+
+## 🔁 ReAct
+
+O laboratório implementa um ciclo ReAct controlado.
+
+Conceitualmente:
+
+```text
+Reason
+   ↓
+Act
+   ↓
+Observe
+   ↓
+continuar ou finalizar
+```
+
+Na implementação, o raciocínio interno do modelo não é armazenado ou exposto.
+
+O sistema registra apenas informações operacionais necessárias para auditoria:
+
+```text
+passo
+ferramenta
+argumentos
+status
+```
+
+Exemplo de trace:
+
+```json
+{
+  "passo": 1,
+  "ferramenta": "consultar_rag",
+  "argumentos": {
+    "pergunta": "Como identificar e analisar um incidente de phishing?"
+  },
+  "status": "ok"
+}
+```
+
+O número máximo atual de passos é:
+
+```python
+MAX_REACT_STEPS = 3
+```
+
+Isso funciona como um guardrail contra ciclos indefinidos.
+
+---
+
+## 🛡️ Guardrails
+
+A arquitetura possui controles para reduzir comportamentos inesperados:
+
+- allowlist de ferramentas;
+- validação dos argumentos;
+- threshold mínimo para contexto;
+- fallback quando não existe contexto confiável;
+- limite de passos ReAct;
+- proteção contra loops infinitos;
+- separação entre conhecimento recuperado e decisão do agente;
+- credenciais fora do código-fonte.
+
+---
+
+## 🔐 Threshold de confiança
+
+O projeto utiliza:
+
+```python
+SIMILARIDADE_MINIMA = 0.60
+```
+
+A decisão é centralizada em:
+
+```python
+contexto_confiavel(similaridade)
+```
+
+Somente documentos que atingem o limite configurado são considerados contexto confiável.
+
+---
+
+## 🔎 Exemplo de busca vetorial
+
+Exemplo validado durante o desenvolvimento:
 
 ```text
 Pergunta:
@@ -155,40 +371,27 @@ Houve alguma tentativa de phishing?
 
 Resultado:
 
-ID 3 | similaridade 0.8217 | ACEITO
+similaridade: 0.8217
+status: ACEITO
+
 Foi detectada uma tentativa de phishing contra funcionarios.
 ```
 
-Resultados abaixo do threshold são descartados:
+Outro resultado validado:
 
 ```text
-ID 1 | similaridade 0.5786 | DESCARTADO
-ID 4 | similaridade 0.4312 | DESCARTADO
+Pergunta:
+O firewall bloqueou alguma tentativa de acesso?
+
+similaridade: 0.8897
+status: ACEITO
 ```
 
----
-
-## 🛡️ Threshold de confiança
-
-O projeto utiliza um limite mínimo de similaridade:
-
-```python
-SIMILARIDADE_MINIMA = 0.60
-```
-
-A decisão de confiança é centralizada na função:
-
-```python
-contexto_confiavel(similaridade)
-```
-
-Isso permite que somente documentos que atingem o limite configurado sejam enviados como contexto para o modelo de linguagem.
+Resultados abaixo do threshold são descartados.
 
 ---
 
 ## 🚫 Proteção contra contexto insuficiente
-
-O pipeline foi projetado para não utilizar o LLM quando a recuperação vetorial não encontra contexto suficientemente relevante.
 
 Exemplo validado:
 
@@ -201,118 +404,102 @@ Melhor similaridade:
 
 Resultado:
 Nao ha informacao suficiente no contexto.
-
-PIPELINE CONCLUIDO SEM CHAMAR O OLLAMA
 ```
 
-Isso reduz o risco de gerar respostas baseadas em documentos semanticamente distantes da pergunta.
+O objetivo é impedir que documentos semanticamente distantes sejam utilizados como base para respostas.
 
 ---
 
-## 💡 Exemplos de execução
+## 🧰 Tecnologias
 
-### Phishing
-
-```powershell
-python src\rag.py "Houve alguma tentativa de phishing?"
-```
-
-Resultado validado:
-
-```text
-Sim, houve uma tentativa de phishing.
-```
-
-Similaridade recuperada:
-
-```text
-0.8217
-```
-
-### Firewall
-
-```powershell
-python src\rag.py "O firewall bloqueou alguma tentativa de acesso?"
-```
-
-Resultado validado:
-
-```text
-Sim, o firewall bloqueou uma tentativa de acesso externo.
-```
-
-Similaridade recuperada:
-
-```text
-0.8897
-```
-
-### Pergunta sem contexto
-
-```powershell
-python src\rag.py "Existe algum incidente envolvendo Kubernetes?"
-```
-
-Resultado:
-
-```text
-Nao ha informacao suficiente no contexto.
-```
-
-Nesse cenário, o Ollama não é chamado.
+| Tecnologia | Utilização |
+|---|---|
+| Python | RAG, agente e processamento |
+| PostgreSQL | Persistência de documentos |
+| pgvector | Banco e busca vetorial |
+| Sentence Transformers | Embeddings |
+| Ollama | Execução local do LLM |
+| Qwen | Modelo utilizado pelo agente |
+| Docker | Infraestrutura PostgreSQL + pgvector |
+| Pytest | Testes automatizados |
+| Git | Versionamento |
+| GitHub | Repositório e evolução do projeto |
 
 ---
 
-## 🔐 Segurança
-
-O projeto utiliza variáveis de ambiente para evitar o versionamento de credenciais reais.
-
-O arquivo:
+## 📂 Estrutura do projeto
 
 ```text
-.env.example
+rag-vector-security-lab/
+│
+├── assets/
+│   └── rag-vector-security-lab.png
+│
+├── src/
+│   ├── agente_soc.py
+│   ├── busca_pgvector.py
+│   ├── busca_semantica.py
+│   ├── config.py
+│   ├── ingestao_pgvector.py
+│   ├── primeiro_embedding.py
+│   └── rag.py
+│
+├── tests/
+│   ├── test_agente_soc.py
+│   ├── test_agent_loop.py
+│   ├── test_filtrar_contexto.py
+│   ├── test_native_tool_calling.py
+│   ├── test_ollama_native_tools.py
+│   ├── test_rag_refatoracao.py
+│   ├── test_react.py
+│   ├── test_threshold.py
+│   ├── test_threshold_comportamento.py
+│   └── test_tool_calling.py
+│
+├── .env.example
+├── .gitignore
+├── docker-compose.yml
+└── README.md
 ```
 
-serve como modelo de configuração.
-
-O arquivo local:
-
-```text
-.env
-```
-
-não deve ser enviado ao repositório.
-
-O projeto foi auditado antes da publicação para impedir o versionamento de:
-
-- senhas reais;
-- tokens;
-- API Keys;
-- chaves privadas;
-- certificados privados;
-- arquivos `.env` reais.
+O arquivo `.env` é local e não deve ser versionado.
 
 ---
 
-## 🐳 PostgreSQL + pgvector
+## 🐘 PostgreSQL + pgvector
 
-A infraestrutura do banco vetorial pode ser iniciada com Docker Compose:
+Subir a infraestrutura:
 
 ```powershell
 docker compose up -d
 ```
 
-Para verificar os containers:
+Verificar:
 
 ```powershell
 docker compose ps
 ```
 
+O laboratório utiliza PostgreSQL com a extensão pgvector para persistência e recuperação vetorial.
+
+---
+
+## 🦙 Ollama
+
+Modelos disponíveis no ambiente de desenvolvimento:
+
+```text
+qwen3:4b-instruct
+embeddinggemma:latest
+```
+
+O agente utiliza Qwen para decisões e Native Tool Calling.
+
+O pipeline de embeddings do RAG utiliza Sentence Transformers.
+
 ---
 
 ## 🧪 Testes automatizados
-
-O projeto possui testes automatizados para validar o comportamento do threshold.
 
 Execute:
 
@@ -320,52 +507,233 @@ Execute:
 python -m pytest -q
 ```
 
-Estado validado durante o desenvolvimento:
+Estado atual validado:
 
 ```text
-7 passed
+40 passed
+```
+
+Os testes cobrem:
+
+- threshold de confiança;
+- filtragem de contexto;
+- comportamento do RAG;
+- roteamento do agente;
+- LLM-based routing;
+- Native Tool Calling;
+- execução de ferramentas;
+- Agent Loop;
+- ReAct;
+- limite de passos;
+- comportamento sem necessidade de ferramenta.
+
+---
+
+## ▶️ Execução
+
+### 1. Iniciar PostgreSQL
+
+```powershell
+docker compose up -d
+```
+
+### 2. Ativar ambiente virtual
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+### 3. Configurar variáveis de ambiente
+
+Utilize o `.env.example` como referência.
+
+Nunca versione credenciais reais ou o arquivo `.env`.
+
+### 4. Executar testes
+
+```powershell
+python -m pytest -q
+```
+
+### 5. Executar RAG
+
+```powershell
+python src\rag.py "Houve alguma tentativa de phishing?"
 ```
 
 ---
 
-## 🧩 Conceitos explorados
+## 📚 Conceitos explorados
 
-Este laboratório trabalha conceitos de:
+O laboratório trabalha atualmente com:
 
 - Retrieval-Augmented Generation (RAG);
+- Agentic RAG;
 - Vector Databases;
 - Semantic Search;
 - Embeddings;
-- Similaridade vetorial;
 - Context Retrieval;
-- LLM local;
 - Threshold de confiança;
+- LLM local;
+- Tool Routing;
+- Tool Calling;
+- Native Tool Calling;
+- Agent Loop;
+- ReAct;
+- Guardrails;
 - PostgreSQL;
 - pgvector;
 - Ollama;
-- Segurança de credenciais;
-- Testes automatizados;
+- testes automatizados;
+- segurança de credenciais;
 - IA aplicada à Cibersegurança.
 
 ---
 
-## 🚀 Possíveis evoluções
+# 🗺️ Roadmap
 
-O laboratório pode evoluir futuramente com:
+As funcionalidades abaixo são **evoluções planejadas** e ainda não devem ser interpretadas como funcionalidades implementadas.
 
-- ingestão de eventos reais de SOC;
-- Threat Intelligence;
-- ingestão e correlação de IOCs;
-- CVEs e vulnerabilidades;
-- integração com MISP;
-- integração com APIs de segurança;
-- filtros por metadados;
-- observabilidade do pipeline RAG;
-- avaliação automática da recuperação;
-- API com FastAPI;
-- interface web;
-- integração com agentes de IA;
-- automações de segurança.
+## 🧠 Memory e estado
+
+- [ ] Memory de sessão;
+- [ ] Memory persistente;
+- [ ] histórico estruturado de investigação;
+- [ ] estado compartilhado entre etapas do agente;
+- [ ] recuperação seletiva de memória.
+
+## 🛡️ Robustez e segurança do agente
+
+- [ ] Tool Error Handling;
+- [ ] tratamento de indisponibilidade de banco e APIs;
+- [ ] timeout controlado de ferramentas;
+- [ ] retry controlado;
+- [ ] validação avançada de argumentos;
+- [ ] políticas de execução por ferramenta;
+- [ ] guardrails avançados.
+
+## 🔍 Capacidades SOC
+
+- [ ] enriquecimento de IOCs;
+- [ ] análise de IPs, domínios, URLs e hashes;
+- [ ] Threat Intelligence;
+- [ ] integração com MISP;
+- [ ] consulta de CVEs e vulnerabilidades;
+- [ ] correlação de eventos;
+- [ ] classificação de incidentes;
+- [ ] triagem SOC N1;
+- [ ] decisão estruturada de incidentes;
+- [ ] recomendação de escalonamento.
+
+## 🔧 Novas ferramentas do agente
+
+- [ ] ferramenta de enriquecimento de IOC;
+- [ ] ferramenta de consulta de vulnerabilidades;
+- [ ] ferramenta de consulta de Threat Intelligence;
+- [ ] ferramenta de correlação;
+- [ ] ferramenta de consulta de eventos;
+- [ ] ferramentas SOC especializadas.
+
+## ⚙️ Automação
+
+- [ ] integração com n8n;
+- [ ] workflows de resposta a incidentes;
+- [ ] entrada de alertas via webhook;
+- [ ] integração com APIs de segurança;
+- [ ] automação de triagem;
+- [ ] automação de enriquecimento;
+- [ ] escalonamento automatizado controlado.
+
+## 🔌 MCP
+
+- [ ] integração com Model Context Protocol;
+- [ ] exposição controlada de ferramentas via MCP;
+- [ ] servidores MCP especializados;
+- [ ] integração entre agente e serviços externos.
+
+## 🤖 Multi-Agent
+
+- [ ] arquitetura Multi-Agent;
+- [ ] agente de triagem;
+- [ ] agente de Threat Intelligence;
+- [ ] agente de enriquecimento;
+- [ ] agente de correlação;
+- [ ] agente de decisão;
+- [ ] coordenação entre agentes.
+
+## 📊 Observabilidade e avaliação
+
+- [ ] logging estruturado;
+- [ ] tracing de execução;
+- [ ] métricas de Tool Calling;
+- [ ] métricas de latência;
+- [ ] avaliação automática do RAG;
+- [ ] avaliação das respostas do agente;
+- [ ] avaliação de recuperação;
+- [ ] acompanhamento de falhas de ferramentas;
+- [ ] auditoria das ações do agente.
+
+## 🌐 Serviços e interfaces
+
+- [ ] API com FastAPI;
+- [ ] endpoints para análise de incidentes;
+- [ ] interface web;
+- [ ] dashboard de investigações;
+- [ ] visualização do trace operacional.
+
+---
+
+## 🚀 Visão futura
+
+A evolução planejada do laboratório é:
+
+```text
+Evento / Alerta de Segurança
+            ↓
+        Agente SOC
+            ↓
+          Triagem
+            ↓
+           ReAct
+            ↓
+ ┌──────────┼───────────┐
+ ↓          ↓           ↓
+RAG    Threat Intel   Enriquecimento
+ │          │           │
+ └──────────┼───────────┘
+            ↓
+     Memory / Estado
+            ↓
+        Correlação
+            ↓
+   Decisão estruturada
+            ↓
+          n8n
+            ↓
+ Resposta / Escalonamento
+```
+
+Em uma evolução posterior:
+
+```text
+                  Orquestrador
+                       │
+       ┌───────────────┼────────────────┐
+       │               │                │
+       ▼               ▼                ▼
+Agente Triagem   Agente Threat    Agente Correlação
+                     Intel
+       │               │                │
+       └───────────────┼────────────────┘
+                       │
+                       ▼
+                  MCP / Tools
+                       │
+                       ▼
+              Sistemas de Segurança
+```
+
+O objetivo de longo prazo é transformar o laboratório em uma arquitetura experimental de **Agentes de IA aplicados a operações SOC**, mantendo segurança, rastreabilidade, observabilidade e controle das ações.
 
 ---
 
@@ -373,7 +741,7 @@ O laboratório pode evoluir futuramente com:
 
 **Paula Sabino**
 
-Cybersecurity • Inteligência Artificial • Automação • RAG
+Cybersecurity • Inteligência Artificial • Automação • RAG • Agentic AI
 
 GitHub: **Paula-Tech007**
 
@@ -383,15 +751,26 @@ GitHub: **Paula-Tech007**
 
 | Componente | Status |
 |---|---|
-| Pipeline RAG | ✅ |
-| PostgreSQL | ✅ |
-| pgvector | ✅ |
-| Embeddings | ✅ |
-| Busca semântica | ✅ |
-| Threshold | ✅ |
-| Ollama | ✅ |
-| Fallback sem contexto | ✅ |
-| Proteção de credenciais | ✅ |
-| Testes automatizados | ✅ |
+| Pipeline RAG | ✅ Implementado |
+| PostgreSQL + pgvector | ✅ Implementado |
+| Embeddings | ✅ Implementado |
+| Busca semântica | ✅ Implementado |
+| Threshold | ✅ Implementado |
+| Ollama | ✅ Implementado |
+| Fallback seguro | ✅ Implementado |
+| Agent Routing | ✅ Implementado |
+| LLM-based Routing | ✅ Implementado |
+| Native Tool Calling | ✅ Implementado |
+| Agent Loop | ✅ Implementado |
+| ReAct | ✅ Implementado |
+| Trace operacional | ✅ Implementado |
+| Limite de passos | ✅ Implementado |
+| Testes automatizados | ✅ 40 testes |
+| Memory | 📌 Roadmap |
+| Tool Error Handling | 📌 Roadmap |
+| n8n | 📌 Roadmap |
+| MCP | 📌 Roadmap |
+| Multi-Agent | 📌 Roadmap |
+| Observabilidade | 📌 Roadmap |
 
-**Projeto funcional, testado e validado em ambiente local.**
+**Projeto funcional, testado e em evolução contínua.**

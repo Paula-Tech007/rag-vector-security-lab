@@ -1,7 +1,9 @@
-"""Agente SOC inicial para demonstrar decisao e uso de ferramentas."""
+﻿"""Agente SOC inicial para demonstrar decisao e uso de ferramentas."""
 
 import json
 import urllib.request
+
+from memory import SessionMemory
 
 from rag import executar_rag
 
@@ -45,7 +47,7 @@ PALAVRAS_RAG = {
     "vulnerabilidade",
     "ataque",
     "ameaca",
-    "ameaça",
+    "ameaÃ§a",
     "ioc",
 }
 
@@ -489,3 +491,176 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+def executar_react_com_memoria(
+    entrada: str,
+    session_id: str,
+    memory: SessionMemory,
+    max_steps: int = MAX_REACT_STEPS,
+) -> dict:
+    """Executa ReAct utilizando memoria de sessao."""
+
+    if not isinstance(entrada, str) or not entrada.strip():
+        return {
+            "status": "erro",
+            "resposta": "Entrada vazia.",
+            "trace": [],
+            "session_id": session_id,
+        }
+
+    if (
+        not isinstance(session_id, str)
+        or not session_id.strip()
+    ):
+        return {
+            "status": "erro",
+            "resposta": "session_id invalido.",
+            "trace": [],
+            "session_id": session_id,
+        }
+
+    if not isinstance(memory, SessionMemory):
+        return {
+            "status": "erro",
+            "resposta": "Memory invalida.",
+            "trace": [],
+            "session_id": session_id,
+        }
+
+    if max_steps < 1:
+        return {
+            "status": "erro",
+            "resposta": "max_steps deve ser maior que zero.",
+            "trace": [],
+            "session_id": session_id,
+        }
+
+    entrada = entrada.strip()
+    session_id = session_id.strip()
+
+    historico = memory.obter_historico(
+        session_id
+    )
+
+    memory.adicionar(
+        session_id,
+        "user",
+        entrada,
+    )
+
+    historico.append(
+        {
+            "role": "user",
+            "content": entrada,
+        }
+    )
+
+    trace = []
+
+    for passo in range(1, max_steps + 1):
+
+        mensagem = consultar_agente_ollama(
+            historico
+        )
+
+        chamada = extrair_tool_call(
+            mensagem
+        )
+
+        if chamada is None:
+
+            resposta = (
+                mensagem.get(
+                    "content",
+                    "",
+                ).strip()
+                or "Nenhuma ferramenta foi necessaria."
+            )
+
+            memory.adicionar(
+                session_id,
+                "assistant",
+                resposta,
+            )
+
+            return {
+                "status": (
+                    "sem_acao"
+                    if not trace
+                    else "ok"
+                ),
+                "resposta": resposta,
+                "trace": trace,
+                "session_id": session_id,
+                "memory_size": memory.tamanho(
+                    session_id
+                ),
+            }
+
+        nome, argumentos = chamada
+
+        resultado_tool = executar_tool(
+            nome,
+            argumentos,
+        )
+
+        trace.append(
+            {
+                "passo": passo,
+                "ferramenta": nome,
+                "argumentos": argumentos,
+                "status": resultado_tool.get(
+                    "status",
+                    "desconhecido",
+                ),
+            }
+        )
+
+        observacao = {
+            "status": resultado_tool.get(
+                "status",
+            ),
+            "resposta": resultado_tool.get(
+                "resposta",
+            ),
+            "contextos": resultado_tool.get(
+                "contextos",
+                [],
+            ),
+        }
+
+        historico.append(
+            mensagem
+        )
+
+        historico.append(
+            {
+                "role": "tool",
+                "content": json.dumps(
+                    observacao,
+                    ensure_ascii=False,
+                ),
+            }
+        )
+
+    resposta = (
+        "Limite de passos ReAct atingido."
+    )
+
+    memory.adicionar(
+        session_id,
+        "assistant",
+        resposta,
+    )
+
+    return {
+        "status": "limite",
+        "resposta": resposta,
+        "trace": trace,
+        "session_id": session_id,
+        "memory_size": memory.tamanho(
+            session_id
+        ),
+    }

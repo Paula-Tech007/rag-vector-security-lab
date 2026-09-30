@@ -4,9 +4,9 @@
 
 # RAG Vector Security Lab
 
-Laboratório prático de **RAG e Agentic RAG aplicado à Segurança Cibernética**, utilizando PostgreSQL, pgvector, embeddings semânticos, Ollama e agentes de IA com Tool Calling e ReAct.
+Laboratório prático de **RAG e Agentic RAG aplicado à Segurança Cibernética**, utilizando PostgreSQL, pgvector, embeddings semânticos, Ollama e agentes de IA com Tool Calling, ReAct e Memory.
 
-O projeto começou como um pipeline RAG seguro e está evoluindo progressivamente para uma arquitetura de **Agente SOC com IA**, mantendo controle de contexto, guardrails, rastreabilidade e testes automatizados.
+O projeto começou como um pipeline RAG seguro e está evoluindo progressivamente para uma arquitetura de **Agente SOC com IA**, mantendo controle de contexto, guardrails, rastreabilidade, memória de sessão e testes automatizados.
 
 ---
 
@@ -24,6 +24,8 @@ Construir e evoluir uma arquitetura de IA aplicada a cenários de Segurança Cib
 - permitir que um agente escolha quando utilizar ferramentas;
 - executar ferramentas através de Native Tool Calling;
 - trabalhar com ciclos controlados de Agent Loop e ReAct;
+- manter contexto entre interações através de Memory;
+- utilizar memória para orientar decisões e consultas posteriores;
 - registrar trace operacional das ações;
 - limitar execuções autônomas por guardrails;
 - proteger credenciais com variáveis de ambiente;
@@ -52,7 +54,10 @@ Agent Loop
 ReAct
  │
  ▼
-Memory
+Session Memory
+ │
+ ▼
+Persistent Memory
  │
  ▼
 SOC Agent
@@ -61,60 +66,72 @@ SOC Agent
 MCP / Multi-Agent
 ```
 
-As etapas até **ReAct** já foram implementadas.
+As etapas até **Session Memory** já foram implementadas e validadas.
 
-As etapas seguintes fazem parte do roadmap do laboratório.
+A próxima evolução planejada é a implementação de **Persistent Memory**, permitindo que o agente recupere o contexto de uma investigação mesmo após o encerramento do processo Python.
+
+As demais etapas continuam fazendo parte do roadmap do laboratório.
 
 ---
 
 ## 🏗️ Arquitetura atual
 
 ```text
-                    ┌──────────────────────┐
-                    │   Entrada do usuário │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │   Agente SOC / Qwen  │
-                    └──────────┬───────────┘
-                               │
-                     decisão de ferramenta
-                               │
-                 ┌─────────────┴─────────────┐
-                 │                           │
-                 ▼                           ▼
-        responder diretamente       consultar_rag
-                                             │
-                                             ▼
-                                      gerar embedding
-                                             │
-                                             ▼
-                                   PostgreSQL + pgvector
-                                             │
-                                             ▼
-                                      busca semântica
-                                             │
-                                             ▼
-                                   threshold de confiança
-                                             │
-                                  ┌──────────┴──────────┐
-                                  │                     │
-                                  ▼                     ▼
-                           contexto confiável     contexto insuficiente
-                                  │                     │
-                                  ▼                     ▼
-                             observação           fallback seguro
-                                  │
-                                  ▼
-                           volta ao agente
-                                  │
-                                  ▼
-                          próxima decisão
-                                  │
-                                  ▼
-                           resposta final
+                     ┌──────────────────────┐
+                     │   Entrada do usuário │
+                     └──────────┬───────────┘
+                                │
+                                ▼
+                     ┌──────────────────────┐
+                     │    Session Memory    │
+                     └──────────┬───────────┘
+                                │
+                                ▼
+                     ┌──────────────────────┐
+                     │   Agente SOC / Qwen  │
+                     └──────────┬───────────┘
+                                │
+                       decisão de ferramenta
+                                │
+                 ┌──────────────┴──────────────┐
+                 │                             │
+                 ▼                             ▼
+        responder diretamente           consultar_rag
+                                               │
+                                               ▼
+                                        gerar embedding
+                                               │
+                                               ▼
+                                    PostgreSQL + pgvector
+                                               │
+                                               ▼
+                                       busca semântica
+                                               │
+                                               ▼
+                                    threshold de confiança
+                                               │
+                                    ┌──────────┴──────────┐
+                                    │                     │
+                                    ▼                     ▼
+                             contexto confiável    contexto insuficiente
+                                    │                     │
+                                    ▼                     ▼
+                               observação           fallback seguro
+                                    │
+                                    ▼
+                              volta ao agente
+                                    │
+                                    ▼
+                              próxima decisão
+                                    │
+                                    ▼
+                              resposta final
+                                    │
+                                    ▼
+                              Session Memory
 ```
+
+A memória de sessão fornece ao agente o histórico necessário para interpretar referências contextuais entre diferentes interações.
 
 ---
 
@@ -163,10 +180,13 @@ para:
 ```text
 Pergunta
    ↓
+Memory
+   ↓
 Agente
    ↓
 Decisão
    ├── responder diretamente
+   │
    └── utilizar ferramenta
               ↓
              RAG
@@ -176,11 +196,23 @@ Decisão
             Agente
               ↓
         resposta final
+              ↓
+            Memory
 ```
 
 O RAG não é substituído pelo agente.
 
 Ele passa a funcionar como uma **ferramenta especializada de recuperação de conhecimento**.
+
+A Memory também não substitui o RAG:
+
+```text
+RAG    → conhecimento externo recuperado
+Memory → contexto e estado das interações
+ReAct  → decisão, ação e observação
+```
+
+Esses componentes trabalham em conjunto dentro da arquitetura Agentic RAG.
 
 ---
 
@@ -328,6 +360,156 @@ Isso funciona como um guardrail contra ciclos indefinidos.
 
 ---
 
+## 🧠 Session Memory
+
+O laboratório possui uma camada de **memória de sessão** integrada ao agente ReAct.
+
+A implementação utiliza:
+
+```text
+SessionMemory
+```
+
+A memória mantém históricos independentes através de:
+
+```text
+session_id
+```
+
+Cada sessão pode armazenar mensagens com os papéis:
+
+```text
+user
+assistant
+tool
+```
+
+A implementação permite:
+
+- adicionar mensagens;
+- recuperar o histórico de uma sessão;
+- manter sessões isoladas;
+- limpar uma sessão;
+- consultar o tamanho do histórico;
+- validar `session_id`;
+- validar papéis de mensagens;
+- impedir conteúdo vazio;
+- retornar cópias do histórico para evitar alteração externa acidental.
+
+O agente utiliza:
+
+```python
+executar_react_com_memoria(...)
+```
+
+para combinar o histórico da sessão com o ciclo ReAct.
+
+Fluxo:
+
+```text
+Interação 1
+   ↓
+Usuário informa contexto
+   ↓
+SessionMemory
+   ↓
+Agente responde
+   ↓
+SessionMemory
+   ↓
+Interação 2
+   ↓
+Histórico recuperado
+   ↓
+Agente interpreta o novo pedido
+   ↓
+Decide responder ou utilizar ferramenta
+```
+
+A memória atual é mantida durante a execução do processo Python.
+
+Portanto:
+
+```text
+Processo Python ativo
+        ↓
+Memory disponível
+
+Processo encerrado
+        ↓
+Memory em RAM é perdida
+```
+
+A persistência entre execuções será tratada na próxima etapa do projeto através de **Persistent Memory**.
+
+---
+
+## 🔗 Memory + ReAct + RAG
+
+A integração completa entre Memory, ReAct e RAG foi validada em execução real.
+
+O cenário utilizado foi uma investigação de phishing.
+
+Primeira interação:
+
+```text
+Estamos investigando um incidente de phishing.
+```
+
+O contexto foi armazenado na sessão.
+
+Na interação seguinte, o usuário solicitou:
+
+```text
+Consulte nossa base de conhecimento e verifique
+se existe contexto relacionado a esse incidente.
+```
+
+A segunda mensagem não repetiu explicitamente o tipo do incidente.
+
+O agente recuperou o contexto anterior da Memory e gerou uma chamada de ferramenta semelhante a:
+
+```json
+{
+  "passo": 1,
+  "ferramenta": "consultar_rag",
+  "argumentos": {
+    "pergunta": "O que é phishing e quais são os sinais de alerta comuns em um incidente de phishing?"
+  },
+  "status": "ok"
+}
+```
+
+Isso validou o fluxo:
+
+```text
+Session Memory
+      ↓
+ReAct
+      ↓
+Native Tool Calling
+      ↓
+consultar_rag
+      ↓
+Embedding
+      ↓
+PostgreSQL + pgvector
+      ↓
+Threshold
+      ↓
+Observação
+      ↓
+Agente
+      ↓
+Resposta final
+      ↓
+Session Memory
+```
+
+O teste demonstrou que o agente consegue utilizar informações armazenadas anteriormente para contextualizar uma nova decisão e construir uma consulta ao RAG.
+
+---
+
 ## 🛡️ Guardrails
 
 A arquitetura possui controles para reduzir comportamentos inesperados:
@@ -338,8 +520,12 @@ A arquitetura possui controles para reduzir comportamentos inesperados:
 - fallback quando não existe contexto confiável;
 - limite de passos ReAct;
 - proteção contra loops infinitos;
+- isolamento de memória por `session_id`;
+- validação das mensagens armazenadas em Memory;
 - separação entre conhecimento recuperado e decisão do agente;
 - credenciais fora do código-fonte.
+
+Guardrails adicionais para grounding de respostas, falhas de ferramentas e persistência serão implementados nas próximas etapas.
 
 ---
 
@@ -367,6 +553,7 @@ Exemplo validado durante o desenvolvimento:
 
 ```text
 Pergunta:
+
 Houve alguma tentativa de phishing?
 
 Resultado:
@@ -381,6 +568,7 @@ Outro resultado validado:
 
 ```text
 Pergunta:
+
 O firewall bloqueou alguma tentativa de acesso?
 
 similaridade: 0.8897
@@ -397,12 +585,15 @@ Exemplo validado:
 
 ```text
 Pergunta:
+
 Existe algum incidente envolvendo Kubernetes?
 
 Melhor similaridade:
+
 0.2987
 
 Resultado:
+
 Nao ha informacao suficiente no contexto.
 ```
 
@@ -414,7 +605,7 @@ O objetivo é impedir que documentos semanticamente distantes sejam utilizados c
 
 | Tecnologia | Utilização |
 |---|---|
-| Python | RAG, agente e processamento |
+| Python | RAG, agente, Memory e processamento |
 | PostgreSQL | Persistência de documentos |
 | pgvector | Banco e busca vetorial |
 | Sentence Transformers | Embeddings |
@@ -441,13 +632,16 @@ rag-vector-security-lab/
 │   ├── busca_semantica.py
 │   ├── config.py
 │   ├── ingestao_pgvector.py
+│   ├── memory.py
 │   ├── primeiro_embedding.py
 │   └── rag.py
 │
 ├── tests/
 │   ├── test_agente_soc.py
 │   ├── test_agent_loop.py
+│   ├── test_agent_memory.py
 │   ├── test_filtrar_contexto.py
+│   ├── test_memory.py
 │   ├── test_native_tool_calling.py
 │   ├── test_ollama_native_tools.py
 │   ├── test_rag_refatoracao.py
@@ -482,6 +676,8 @@ docker compose ps
 
 O laboratório utiliza PostgreSQL com a extensão pgvector para persistência e recuperação vetorial.
 
+A próxima evolução também utilizará persistência para permitir que a Memory sobreviva ao encerramento do processo do agente.
+
 ---
 
 ## 🦙 Ollama
@@ -510,7 +706,7 @@ python -m pytest -q
 Estado atual validado:
 
 ```text
-40 passed
+54 passed
 ```
 
 Os testes cobrem:
@@ -525,7 +721,36 @@ Os testes cobrem:
 - Agent Loop;
 - ReAct;
 - limite de passos;
-- comportamento sem necessidade de ferramenta.
+- comportamento sem necessidade de ferramenta;
+- Session Memory;
+- armazenamento de mensagens;
+- recuperação de histórico;
+- isolamento entre sessões;
+- limpeza de sessão;
+- validação de `session_id`;
+- validação de mensagens;
+- proteção do histórico contra alteração externa;
+- integração entre Memory e ReAct;
+- utilização do histórico em interações posteriores;
+- execução de ferramenta dentro do fluxo com Memory.
+
+Além da suíte automatizada, foi validado um cenário real E2E utilizando:
+
+```text
+Memory
+  ↓
+ReAct
+  ↓
+Native Tool Calling
+  ↓
+RAG
+  ↓
+PostgreSQL + pgvector
+  ↓
+Ollama
+  ↓
+Resposta
+```
 
 ---
 
@@ -580,6 +805,8 @@ O laboratório trabalha atualmente com:
 - Native Tool Calling;
 - Agent Loop;
 - ReAct;
+- Session Memory;
+- gerenciamento de estado por sessão;
 - Guardrails;
 - PostgreSQL;
 - pgvector;
@@ -592,15 +819,23 @@ O laboratório trabalha atualmente com:
 
 # 🗺️ Roadmap
 
-As funcionalidades abaixo são **evoluções planejadas** e ainda não devem ser interpretadas como funcionalidades implementadas.
+O roadmap abaixo diferencia funcionalidades já implementadas das próximas evoluções do laboratório.
 
 ## 🧠 Memory e estado
 
-- [ ] Memory de sessão;
+- [x] Memory de sessão;
+- [x] integração entre Memory e ReAct;
+- [x] utilização de contexto anterior em novas decisões;
+- [x] isolamento de memória por `session_id`;
+- [x] validação automatizada da Session Memory;
+- [x] validação E2E de Memory + ReAct + RAG;
 - [ ] Memory persistente;
 - [ ] histórico estruturado de investigação;
 - [ ] estado compartilhado entre etapas do agente;
-- [ ] recuperação seletiva de memória.
+- [ ] recuperação seletiva de memória;
+- [ ] políticas de retenção de memória.
+
+---
 
 ## 🛡️ Robustez e segurança do agente
 
@@ -610,7 +845,10 @@ As funcionalidades abaixo são **evoluções planejadas** e ainda não devem ser
 - [ ] retry controlado;
 - [ ] validação avançada de argumentos;
 - [ ] políticas de execução por ferramenta;
+- [ ] grounding mais rígido das respostas;
 - [ ] guardrails avançados.
+
+---
 
 ## 🔍 Capacidades SOC
 
@@ -625,6 +863,8 @@ As funcionalidades abaixo são **evoluções planejadas** e ainda não devem ser
 - [ ] decisão estruturada de incidentes;
 - [ ] recomendação de escalonamento.
 
+---
+
 ## 🔧 Novas ferramentas do agente
 
 - [ ] ferramenta de enriquecimento de IOC;
@@ -633,6 +873,8 @@ As funcionalidades abaixo são **evoluções planejadas** e ainda não devem ser
 - [ ] ferramenta de correlação;
 - [ ] ferramenta de consulta de eventos;
 - [ ] ferramentas SOC especializadas.
+
+---
 
 ## ⚙️ Automação
 
@@ -644,12 +886,16 @@ As funcionalidades abaixo são **evoluções planejadas** e ainda não devem ser
 - [ ] automação de enriquecimento;
 - [ ] escalonamento automatizado controlado.
 
+---
+
 ## 🔌 MCP
 
 - [ ] integração com Model Context Protocol;
 - [ ] exposição controlada de ferramentas via MCP;
 - [ ] servidores MCP especializados;
 - [ ] integração entre agente e serviços externos.
+
+---
 
 ## 🤖 Multi-Agent
 
@@ -660,6 +906,8 @@ As funcionalidades abaixo são **evoluções planejadas** e ainda não devem ser
 - [ ] agente de correlação;
 - [ ] agente de decisão;
 - [ ] coordenação entre agentes.
+
+---
 
 ## 📊 Observabilidade e avaliação
 
@@ -672,6 +920,8 @@ As funcionalidades abaixo são **evoluções planejadas** e ainda não devem ser
 - [ ] avaliação de recuperação;
 - [ ] acompanhamento de falhas de ferramentas;
 - [ ] auditoria das ações do agente.
+
+---
 
 ## 🌐 Serviços e interfaces
 
@@ -692,7 +942,7 @@ Evento / Alerta de Segurança
             ↓
         Agente SOC
             ↓
-          Triagem
+           Triagem
             ↓
            ReAct
             ↓
@@ -702,13 +952,13 @@ RAG    Threat Intel   Enriquecimento
  │          │           │
  └──────────┼───────────┘
             ↓
-     Memory / Estado
+      Memory / Estado
             ↓
-        Correlação
+         Correlação
             ↓
-   Decisão estruturada
+    Decisão estruturada
             ↓
-          n8n
+           n8n
             ↓
  Resposta / Escalonamento
 ```
@@ -716,24 +966,24 @@ RAG    Threat Intel   Enriquecimento
 Em uma evolução posterior:
 
 ```text
-                  Orquestrador
+                   Orquestrador
                        │
-       ┌───────────────┼────────────────┐
-       │               │                │
-       ▼               ▼                ▼
-Agente Triagem   Agente Threat    Agente Correlação
-                     Intel
-       │               │                │
-       └───────────────┼────────────────┘
-                       │
-                       ▼
-                  MCP / Tools
+        ┌──────────────┼────────────────┐
+        │              │                │
+        ▼              ▼                ▼
+ Agente Triagem   Agente Threat    Agente Correlação
+                       Intel
+        │              │                │
+        └──────────────┼────────────────┘
                        │
                        ▼
-              Sistemas de Segurança
+                   MCP / Tools
+                       │
+                       ▼
+               Sistemas de Segurança
 ```
 
-O objetivo de longo prazo é transformar o laboratório em uma arquitetura experimental de **Agentes de IA aplicados a operações SOC**, mantendo segurança, rastreabilidade, observabilidade e controle das ações.
+O objetivo de longo prazo é transformar o laboratório em uma arquitetura experimental de **Agentes de IA aplicados a operações SOC**, mantendo segurança, rastreabilidade, observabilidade, memória e controle das ações.
 
 ---
 
@@ -765,8 +1015,11 @@ GitHub: **Paula-Tech007**
 | ReAct | ✅ Implementado |
 | Trace operacional | ✅ Implementado |
 | Limite de passos | ✅ Implementado |
-| Testes automatizados | ✅ 40 testes |
-| Memory | 📌 Roadmap |
+| Session Memory | ✅ Implementado |
+| Memory + ReAct | ✅ Implementado |
+| Memory + ReAct + RAG E2E | ✅ Validado |
+| Testes automatizados | ✅ 54 testes |
+| Persistent Memory | 📌 Próxima etapa |
 | Tool Error Handling | 📌 Roadmap |
 | n8n | 📌 Roadmap |
 | MCP | 📌 Roadmap |

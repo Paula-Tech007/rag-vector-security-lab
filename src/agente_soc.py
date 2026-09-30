@@ -1,10 +1,9 @@
-﻿"""Agente SOC inicial para demonstrar decisao e uso de ferramentas."""
+"""Agente SOC inicial para demonstrar decisao e uso de ferramentas."""
 
 import json
 import urllib.request
 
-from memory import SessionMemory
-
+from memory import MemoryBackend
 from rag import executar_rag
 
 
@@ -38,6 +37,7 @@ FERRAMENTAS_OLLAMA = [
     }
 ]
 
+
 PALAVRAS_RAG = {
     "phishing",
     "firewall",
@@ -47,7 +47,7 @@ PALAVRAS_RAG = {
     "vulnerabilidade",
     "ataque",
     "ameaca",
-    "ameaÃ§a",
+    "ameaça",
     "ioc",
 }
 
@@ -56,7 +56,10 @@ def decidir_ferramenta(entrada: str) -> str:
     """Decide qual ferramenta o agente deve utilizar."""
     texto = entrada.lower()
 
-    if any(palavra in texto for palavra in PALAVRAS_RAG):
+    if any(
+        palavra in texto
+        for palavra in PALAVRAS_RAG
+    ):
         return "rag"
 
     return "nenhuma"
@@ -67,10 +70,9 @@ def decidir_ferramenta_com_modelo(
     consultar_modelo=None,
 ) -> str:
     """Usa o LLM para escolher a ferramenta, com fallback deterministico."""
-    import json
-
     if consultar_modelo is None:
         from rag import consultar_ollama
+
         consultar_modelo = consultar_ollama
 
     prompt = f"""
@@ -92,19 +94,39 @@ Entrada:
 """.strip()
 
     try:
-        resposta = consultar_modelo(prompt)
-        dados = json.loads(resposta)
-        ferramenta = dados.get("ferramenta")
+        resposta = consultar_modelo(
+            prompt
+        )
 
-        if ferramenta in {"rag", "nenhuma"}:
+        dados = json.loads(
+            resposta
+        )
+
+        ferramenta = dados.get(
+            "ferramenta"
+        )
+
+        if ferramenta in {
+            "rag",
+            "nenhuma",
+        }:
             return ferramenta
 
-    except (json.JSONDecodeError, TypeError, AttributeError):
+    except (
+        json.JSONDecodeError,
+        TypeError,
+        AttributeError,
+    ):
         pass
 
-    return decidir_ferramenta(entrada)
+    return decidir_ferramenta(
+        entrada
+    )
 
-def consultar_agente_ollama(entrada) -> dict:
+
+def consultar_agente_ollama(
+    entrada,
+) -> dict:
     """Envia entrada ou historico de mensagens ao Ollama."""
     mensagem_sistema = {
         "role": "system",
@@ -118,7 +140,10 @@ def consultar_agente_ollama(entrada) -> dict:
         ),
     }
 
-    if isinstance(entrada, list):
+    if isinstance(
+        entrada,
+        list,
+    ):
         messages = [
             mensagem_sistema,
             *entrada,
@@ -139,15 +164,23 @@ def consultar_agente_ollama(entrada) -> dict:
         "stream": False,
     }
 
-    dados = json.dumps(payload).encode("utf-8")
+    dados = json.dumps(
+        payload
+    ).encode(
+        "utf-8"
+    )
 
-    requisicao = urllib.request.Request(
-        OLLAMA_CHAT_URL,
-        data=dados,
-        headers={
-            "Content-Type": "application/json",
-        },
-        method="POST",
+    requisicao = (
+        urllib.request.Request(
+            OLLAMA_CHAT_URL,
+            data=dados,
+            headers={
+                "Content-Type": (
+                    "application/json"
+                ),
+            },
+            method="POST",
+        )
     )
 
     with urllib.request.urlopen(
@@ -155,59 +188,115 @@ def consultar_agente_ollama(entrada) -> dict:
         timeout=120,
     ) as resposta_http:
         resposta_json = json.loads(
-            resposta_http.read().decode("utf-8")
+            resposta_http.read().decode(
+                "utf-8"
+            )
         )
 
-    return resposta_json.get("message", {})
+    return resposta_json.get(
+        "message",
+        {},
+    )
 
-def extrair_tool_call(mensagem: dict):
+
+def extrair_tool_call(
+    mensagem: dict,
+):
     """Extrai a primeira chamada de ferramenta solicitada pelo modelo."""
-    tool_calls = mensagem.get("tool_calls") or []
+    tool_calls = (
+        mensagem.get(
+            "tool_calls"
+        )
+        or []
+    )
 
     if not tool_calls:
         return None
 
     chamada = tool_calls[0]
-    funcao = chamada.get("function") or {}
 
-    nome = funcao.get("name")
-    argumentos = funcao.get("arguments") or {}
+    funcao = (
+        chamada.get(
+            "function"
+        )
+        or {}
+    )
+
+    nome = funcao.get(
+        "name"
+    )
+
+    argumentos = (
+        funcao.get(
+            "arguments"
+        )
+        or {}
+    )
 
     if not nome:
         return None
 
-    if isinstance(argumentos, str):
+    if isinstance(
+        argumentos,
+        str,
+    ):
         try:
-            import json
-            argumentos = json.loads(argumentos)
+            argumentos = json.loads(
+                argumentos
+            )
         except json.JSONDecodeError:
             argumentos = {}
 
-    if not isinstance(argumentos, dict):
+    if not isinstance(
+        argumentos,
+        dict,
+    ):
         argumentos = {}
 
-    return nome, argumentos
+    return (
+        nome,
+        argumentos,
+    )
 
 
-def executar_tool(nome: str, argumentos: dict) -> dict:
+def executar_tool(
+    nome: str,
+    argumentos: dict,
+) -> dict:
     """Executa somente ferramentas explicitamente permitidas pelo agente."""
     if nome != "consultar_rag":
         return {
             "status": "erro",
             "ferramenta": "nao_permitida",
-            "resposta": f"Ferramenta nao permitida: {nome}",
+            "resposta": (
+                f"Ferramenta nao permitida: {nome}"
+            ),
         }
 
-    pergunta = argumentos.get("pergunta", "")
+    pergunta = argumentos.get(
+        "pergunta",
+        "",
+    )
 
-    if not isinstance(pergunta, str) or not pergunta.strip():
+    if (
+        not isinstance(
+            pergunta,
+            str,
+        )
+        or not pergunta.strip()
+    ):
         return {
             "status": "erro",
             "ferramenta": "consultar_rag",
-            "resposta": "Pergunta invalida para consultar_rag.",
+            "resposta": (
+                "Pergunta invalida para consultar_rag."
+            ),
         }
 
-    return executar_rag(pergunta.strip())
+    return executar_rag(
+        pergunta.strip()
+    )
+
 
 MAX_REACT_STEPS = 3
 
@@ -229,7 +318,9 @@ def executar_react(
     if max_steps < 1:
         return {
             "status": "erro",
-            "resposta": "max_steps deve ser maior que zero.",
+            "resposta": (
+                "max_steps deve ser maior que zero."
+            ),
             "trace": [],
         }
 
@@ -242,9 +333,14 @@ def executar_react(
 
     trace = []
 
-    for passo in range(1, max_steps + 1):
-        mensagem = consultar_agente_ollama(
-            historico
+    for passo in range(
+        1,
+        max_steps + 1,
+    ):
+        mensagem = (
+            consultar_agente_ollama(
+                historico
+            )
         )
 
         chamada = extrair_tool_call(
@@ -253,8 +349,14 @@ def executar_react(
 
         if chamada is None:
             resposta = (
-                mensagem.get("content", "").strip()
-                or "Nenhuma ferramenta foi necessaria."
+                mensagem.get(
+                    "content",
+                    "",
+                ).strip()
+                or (
+                    "Nenhuma ferramenta "
+                    "foi necessaria."
+                )
             )
 
             return {
@@ -279,23 +381,31 @@ def executar_react(
                 "passo": passo,
                 "ferramenta": nome,
                 "argumentos": argumentos,
-                "status": resultado_tool.get(
-                    "status",
-                    "desconhecido",
+                "status": (
+                    resultado_tool.get(
+                        "status",
+                        "desconhecido",
+                    )
                 ),
             }
         )
 
         observacao = {
-            "status": resultado_tool.get(
-                "status",
+            "status": (
+                resultado_tool.get(
+                    "status"
+                )
             ),
-            "resposta": resultado_tool.get(
-                "resposta",
+            "resposta": (
+                resultado_tool.get(
+                    "resposta"
+                )
             ),
-            "contextos": resultado_tool.get(
-                "contextos",
-                [],
+            "contextos": (
+                resultado_tool.get(
+                    "contextos",
+                    [],
+                )
             ),
         }
 
@@ -321,7 +431,10 @@ def executar_react(
         "trace": trace,
     }
 
-def executar_agent_loop(entrada: str) -> dict:
+
+def executar_agent_loop(
+    entrada: str,
+) -> dict:
     """Executa um ciclo controlado: decisao, tool, observacao e resposta."""
     entrada = entrada.strip()
 
@@ -332,16 +445,29 @@ def executar_agent_loop(entrada: str) -> dict:
             "resposta": "Entrada vazia.",
         }
 
-    primeira_mensagem = consultar_agente_ollama(entrada)
-    chamada = extrair_tool_call(primeira_mensagem)
+    primeira_mensagem = (
+        consultar_agente_ollama(
+            entrada
+        )
+    )
+
+    chamada = extrair_tool_call(
+        primeira_mensagem
+    )
 
     if chamada is None:
         return {
             "status": "sem_acao",
             "ferramenta": "nenhuma",
             "resposta": (
-                primeira_mensagem.get("content", "").strip()
-                or "Nenhuma ferramenta foi necessaria."
+                primeira_mensagem.get(
+                    "content",
+                    "",
+                ).strip()
+                or (
+                    "Nenhuma ferramenta "
+                    "foi necessaria."
+                )
             ),
         }
 
@@ -353,9 +479,16 @@ def executar_agent_loop(entrada: str) -> dict:
     )
 
     observacao = {
-        "status": resultado_tool.get("status"),
-        "resposta": resultado_tool.get("resposta"),
-        "contextos": resultado_tool.get("contextos", []),
+        "status": resultado_tool.get(
+            "status"
+        ),
+        "resposta": resultado_tool.get(
+            "resposta"
+        ),
+        "contextos": resultado_tool.get(
+            "contextos",
+            [],
+        ),
     }
 
     historico = [
@@ -373,12 +506,16 @@ def executar_agent_loop(entrada: str) -> dict:
         },
     ]
 
-    mensagem_final = consultar_agente_ollama(
-        historico
+    mensagem_final = (
+        consultar_agente_ollama(
+            historico
+        )
     )
 
-    segunda_chamada = extrair_tool_call(
-        mensagem_final
+    segunda_chamada = (
+        extrair_tool_call(
+            mensagem_final
+        )
     )
 
     if segunda_chamada is not None:
@@ -386,11 +523,14 @@ def executar_agent_loop(entrada: str) -> dict:
             "status": "limite",
             "ferramenta": nome,
             "resposta": (
-                "Limite de chamadas de ferramenta atingido."
+                "Limite de chamadas "
+                "de ferramenta atingido."
             ),
-            "contextos": resultado_tool.get(
-                "contextos",
-                [],
+            "contextos": (
+                resultado_tool.get(
+                    "contextos",
+                    [],
+                )
             ),
         }
 
@@ -401,16 +541,27 @@ def executar_agent_loop(entrada: str) -> dict:
         ),
         "ferramenta": nome,
         "resposta": (
-            mensagem_final.get("content", "").strip()
-            or resultado_tool.get("resposta", "")
+            mensagem_final.get(
+                "content",
+                "",
+            ).strip()
+            or resultado_tool.get(
+                "resposta",
+                "",
+            )
         ),
-        "contextos": resultado_tool.get(
-            "contextos",
-            [],
+        "contextos": (
+            resultado_tool.get(
+                "contextos",
+                [],
+            )
         ),
     }
 
-def executar_agente_nativo(entrada: str) -> dict:
+
+def executar_agente_nativo(
+    entrada: str,
+) -> dict:
     """Executa o agente usando Tool Calling nativo do Ollama."""
     entrada = entrada.strip()
 
@@ -421,16 +572,29 @@ def executar_agente_nativo(entrada: str) -> dict:
             "resposta": "Entrada vazia.",
         }
 
-    mensagem = consultar_agente_ollama(entrada)
-    chamada = extrair_tool_call(mensagem)
+    mensagem = (
+        consultar_agente_ollama(
+            entrada
+        )
+    )
+
+    chamada = extrair_tool_call(
+        mensagem
+    )
 
     if chamada is None:
         return {
             "status": "sem_acao",
             "ferramenta": "nenhuma",
             "resposta": (
-                mensagem.get("content", "").strip()
-                or "Nenhuma ferramenta foi necessaria."
+                mensagem.get(
+                    "content",
+                    "",
+                ).strip()
+                or (
+                    "Nenhuma ferramenta "
+                    "foi necessaria."
+                )
             ),
         }
 
@@ -442,13 +606,23 @@ def executar_agente_nativo(entrada: str) -> dict:
     )
 
     return {
-        "status": resultado["status"],
+        "status": resultado[
+            "status"
+        ],
         "ferramenta": nome,
-        "resposta": resultado["resposta"],
-        "contextos": resultado.get("contextos", []),
+        "resposta": resultado[
+            "resposta"
+        ],
+        "contextos": resultado.get(
+            "contextos",
+            [],
+        ),
     }
 
-def executar_agente(entrada: str) -> dict:
+
+def executar_agente(
+    entrada: str,
+) -> dict:
     """Executa uma decisao simples de agente e chama a ferramenta adequada."""
     entrada = entrada.strip()
 
@@ -459,50 +633,53 @@ def executar_agente(entrada: str) -> dict:
             "resposta": "Entrada vazia.",
         }
 
-    ferramenta = decidir_ferramenta_com_modelo(entrada)
+    ferramenta = (
+        decidir_ferramenta_com_modelo(
+            entrada
+        )
+    )
 
     if ferramenta == "rag":
-        resultado = executar_rag(entrada)
+        resultado = executar_rag(
+            entrada
+        )
 
         return {
-            "status": resultado["status"],
+            "status": resultado[
+                "status"
+            ],
             "ferramenta": "rag",
-            "resposta": resultado["resposta"],
-            "contextos": resultado["contextos"],
+            "resposta": resultado[
+                "resposta"
+            ],
+            "contextos": resultado[
+                "contextos"
+            ],
         }
 
     return {
         "status": "sem_acao",
         "ferramenta": "nenhuma",
-        "resposta": "Nenhuma ferramenta foi necessaria.",
+        "resposta": (
+            "Nenhuma ferramenta foi necessaria."
+        ),
     }
-
-
-def main():
-    entrada = input("Evento ou pergunta para o agente SOC: ").strip()
-
-    resultado = executar_agente(entrada)
-
-    print("\n=== DECISAO DO AGENTE ===")
-    print(f"Ferramenta: {resultado['ferramenta']}")
-    print(f"Status: {resultado['status']}")
-    print(f"Resposta: {resultado['resposta']}")
-
-
-if __name__ == "__main__":
-    main()
-
 
 
 def executar_react_com_memoria(
     entrada: str,
     session_id: str,
-    memory: SessionMemory,
+    memory: MemoryBackend,
     max_steps: int = MAX_REACT_STEPS,
 ) -> dict:
-    """Executa ReAct utilizando memoria de sessao."""
-
-    if not isinstance(entrada, str) or not entrada.strip():
+    """Executa ReAct utilizando um backend de memoria."""
+    if (
+        not isinstance(
+            entrada,
+            str,
+        )
+        or not entrada.strip()
+    ):
         return {
             "status": "erro",
             "resposta": "Entrada vazia.",
@@ -511,17 +688,25 @@ def executar_react_com_memoria(
         }
 
     if (
-        not isinstance(session_id, str)
+        not isinstance(
+            session_id,
+            str,
+        )
         or not session_id.strip()
     ):
         return {
             "status": "erro",
-            "resposta": "session_id invalido.",
+            "resposta": (
+                "session_id invalido."
+            ),
             "trace": [],
             "session_id": session_id,
         }
 
-    if not isinstance(memory, SessionMemory):
+    if not isinstance(
+        memory,
+        MemoryBackend,
+    ):
         return {
             "status": "erro",
             "resposta": "Memory invalida.",
@@ -532,7 +717,9 @@ def executar_react_com_memoria(
     if max_steps < 1:
         return {
             "status": "erro",
-            "resposta": "max_steps deve ser maior que zero.",
+            "resposta": (
+                "max_steps deve ser maior que zero."
+            ),
             "trace": [],
             "session_id": session_id,
         }
@@ -540,8 +727,10 @@ def executar_react_com_memoria(
     entrada = entrada.strip()
     session_id = session_id.strip()
 
-    historico = memory.obter_historico(
-        session_id
+    historico = (
+        memory.obter_historico(
+            session_id
+        )
     )
 
     memory.adicionar(
@@ -559,10 +748,14 @@ def executar_react_com_memoria(
 
     trace = []
 
-    for passo in range(1, max_steps + 1):
-
-        mensagem = consultar_agente_ollama(
-            historico
+    for passo in range(
+        1,
+        max_steps + 1,
+    ):
+        mensagem = (
+            consultar_agente_ollama(
+                historico
+            )
         )
 
         chamada = extrair_tool_call(
@@ -570,13 +763,15 @@ def executar_react_com_memoria(
         )
 
         if chamada is None:
-
             resposta = (
                 mensagem.get(
                     "content",
                     "",
                 ).strip()
-                or "Nenhuma ferramenta foi necessaria."
+                or (
+                    "Nenhuma ferramenta "
+                    "foi necessaria."
+                )
             )
 
             memory.adicionar(
@@ -593,9 +788,13 @@ def executar_react_com_memoria(
                 ),
                 "resposta": resposta,
                 "trace": trace,
-                "session_id": session_id,
-                "memory_size": memory.tamanho(
+                "session_id": (
                     session_id
+                ),
+                "memory_size": (
+                    memory.tamanho(
+                        session_id
+                    )
                 ),
             }
 
@@ -611,23 +810,31 @@ def executar_react_com_memoria(
                 "passo": passo,
                 "ferramenta": nome,
                 "argumentos": argumentos,
-                "status": resultado_tool.get(
-                    "status",
-                    "desconhecido",
+                "status": (
+                    resultado_tool.get(
+                        "status",
+                        "desconhecido",
+                    )
                 ),
             }
         )
 
         observacao = {
-            "status": resultado_tool.get(
-                "status",
+            "status": (
+                resultado_tool.get(
+                    "status"
+                )
             ),
-            "resposta": resultado_tool.get(
-                "resposta",
+            "resposta": (
+                resultado_tool.get(
+                    "resposta"
+                )
             ),
-            "contextos": resultado_tool.get(
-                "contextos",
-                [],
+            "contextos": (
+                resultado_tool.get(
+                    "contextos",
+                    [],
+                )
             ),
         }
 
@@ -660,7 +867,37 @@ def executar_react_com_memoria(
         "resposta": resposta,
         "trace": trace,
         "session_id": session_id,
-        "memory_size": memory.tamanho(
-            session_id
+        "memory_size": (
+            memory.tamanho(
+                session_id
+            )
         ),
     }
+
+
+def main():
+    """Executa o agente SOC pelo terminal."""
+    entrada = input(
+        "Evento ou pergunta para o agente SOC: "
+    ).strip()
+
+    resultado = executar_agente(
+        entrada
+    )
+
+    print(
+        "\n=== DECISAO DO AGENTE ==="
+    )
+    print(
+        f"Ferramenta: {resultado['ferramenta']}"
+    )
+    print(
+        f"Status: {resultado['status']}"
+    )
+    print(
+        f"Resposta: {resultado['resposta']}"
+    )
+
+
+if __name__ == "__main__":
+    main()
